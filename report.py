@@ -7,6 +7,7 @@ Open the output HTML in a browser and print to PDF (Ctrl+P → Save as PDF).
 """
 
 import json
+import html
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -908,6 +909,87 @@ def _load_exfil_df():
         return None
 
 
+def _parse_json_list(value) -> list:
+    if value is None or str(value).strip() in ("", "nan", "None"):
+        return []
+    try:
+        parsed = json.loads(str(value))
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def _day_flag_pills(flags) -> str:
+    if not isinstance(flags, list):
+        return ""
+    colors = {
+        "elevated": "#e67e22",
+        "spike": "#c0392b",
+        "rare_resources": "#8e44ad",
+    }
+    labels = {
+        "elevated": "Elevated",
+        "spike": "Spike",
+        "rare_resources": "Rare Resources",
+    }
+    return "".join(
+        f'<span style="background:{colors.get(flag, "#95a5a6")};color:#fff;'
+        f'border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px">'
+        f'{html.escape(labels.get(flag, str(flag)))}</span>'
+        for flag in flags
+    )
+
+
+def _time_day_evidence_html(row) -> str:
+    days = _parse_json_list(row.get("contributing_day_evidence_json"))
+    if not days:
+        days = _parse_json_list(row.get("daily_evidence_json"))[:8]
+    if not days:
+        contributing = str(row.get("contributing_days", "") or "").replace("|", ", ")
+        if not contributing:
+            return ""
+        return (
+            '<div style="margin-top:10px;padding:10px;background:#f8f9fa;border-radius:4px;'
+            'font-size:12px;line-height:1.6">'
+            '<strong style="color:#2c3e50">Contributing days:</strong> '
+            f'{html.escape(contributing)}</div>'
+        )
+
+    rows = ""
+    for day in days[:10]:
+        flags = _day_flag_pills(day.get("flags", []))
+        rows += f"""
+<tr style="border-bottom:1px solid #eee">
+  <td style="padding:6px 8px;font-weight:600;white-space:nowrap">{html.escape(str(day.get("date", "—")))}</td>
+  <td style="padding:6px 8px;text-align:right">{float(day.get("activity_ratio", 0) or 0):.2f}x</td>
+  <td style="padding:6px 8px;text-align:right">{_fv(day, "bytes", "bytes")}</td>
+  <td style="padding:6px 8px;text-align:right">{_fv(day, "events", "int")}</td>
+  <td style="padding:6px 8px;text-align:right">{_fv(day, "distinct_resources", "int")}</td>
+  <td style="padding:6px 8px;text-align:left">{flags}</td>
+</tr>"""
+
+    th = 'style="background:#ecf0f1;padding:6px 8px;text-align:center;font-size:11px;white-space:nowrap;border-bottom:2px solid #bdc3c7"'
+    return f"""
+<div style="margin-top:12px">
+  <div style="color:#7f8c8d;font-weight:600;margin-bottom:4px;font-size:11px;text-transform:uppercase">
+    Contributing Days
+  </div>
+  <div style="overflow-x:auto">
+    <table style="border-collapse:collapse;width:100%;font-size:12px;border:1px solid #dee2e6">
+      <thead><tr>
+        <th {th} style="text-align:left">Date</th>
+        <th {th}>Activity Ratio</th>
+        <th {th}>Bytes</th>
+        <th {th}>Events</th>
+        <th {th}>Resources</th>
+        <th {th} style="text-align:left">Why It Matters</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>"""
+
+
 def _findings_tab_html(all_scores: dict) -> str:
     peak_ueba: dict[str, float] = {}
     peak_ueba_date: dict[str, str] = {}
@@ -1068,6 +1150,15 @@ def _exfil_tab_html() -> str:
                 if key.strip()
             )
             reasons = str(tr.get("alert_reasons", "") or "—")
+            evidence_summary = str(tr.get("time_evidence_summary", "") or "")
+            day_evidence = _time_day_evidence_html(tr)
+            evidence_block = (
+                f'<div style="padding:10px;background:#fff8e8;border-left:4px solid #e67e22;'
+                f'border-radius:4px;font-size:12px;line-height:1.7;margin:10px 0">'
+                f'<strong style="color:#2c3e50">Contributing-day summary:</strong><br>'
+                f'<span style="color:#555">{html.escape(evidence_summary)}</span></div>'
+                if evidence_summary else ""
+            )
             sections += f"""
 <div style="margin-bottom:16px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -1096,9 +1187,11 @@ def _exfil_tab_html() -> str:
       </table>
     </div>
   </div>
+  {evidence_block}
+  {day_evidence}
   <div style="padding:10px;background:#f8f9fa;border-radius:4px;font-size:12px;line-height:1.7">
     <strong style="color:#2c3e50">Alert reasons:</strong><br>
-    <span style="color:#555">{reasons}</span>
+    <span style="color:#555">{html.escape(reasons)}</span>
   </div>
 </div>"""
 
