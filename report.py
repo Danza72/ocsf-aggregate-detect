@@ -1471,8 +1471,8 @@ def main() -> None:
 
     html = generate(results, baselines, profiles)
     OUTPUT.write_text(html, encoding="utf-8")
-    print(f"Report saved → {OUTPUT}")
-    print("Open in a browser and Ctrl+P → Save as PDF.")
+    print(f"Report saved -> {OUTPUT}")
+    print("Open in a browser and Ctrl+P -> Save as PDF.")
 
 
 if __name__ == "__main__":

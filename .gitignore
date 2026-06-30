@@ -11,6 +11,7 @@ ocsf_out_v3/
 test_data/
 test_data_v2/
 test_data_v3/
+test_data_advanced/
 
 # Raw data / datasets
 botsv3/

@@ -82,7 +82,7 @@ def run_exfil_detection(ocsf_dir: Path, out_dir: Path, range_start: str) -> None
         current_days=None,
         min_score=0,
     )
-    print(f"  Exfil detection: {len(alerts)} alert(s) → {output_path}")
+    print(f"  Exfil detection: {len(alerts)} alert(s) -> {output_path}")
 
 
 def run_report(out_dir: Path, date_str: str,
@@ -136,7 +136,7 @@ def main() -> None:
     print(f"\n=== UEBA Pipeline v3 (v1 weights + max aggregation) ===")
     print(f"  Input  : {ocsf_dir}")
     print(f"  Output : {out_dir}")
-    print(f"  Range  : {start} → {end}")
+    print(f"  Range  : {start} -> {end}")
     print(f"  Days   : {len(day_dirs)} ({day_dirs[0].name} -> {day_dirs[-1].name})\n")
 
     print("=== Step 1: Building baselines ===")
