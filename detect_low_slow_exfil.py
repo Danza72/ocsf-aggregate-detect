@@ -939,6 +939,15 @@ def _trend_slope(days: pd.Series, ratios: pd.Series) -> float:
         return 0.0
 
 
+def _json_safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
 def time_based_s3_volume_features(
     baseline: pd.DataFrame,
     current: pd.DataFrame,
@@ -1018,6 +1027,68 @@ def time_based_s3_volume_features(
         total_current_events = int(g["daily_s3_read_events"].sum())
         cumulative_event_ratio = _safe_ratio(total_current_events, expected_current_events)
 
+        day_rows: list[dict[str, Any]] = []
+        for _, day_row in g.iterrows():
+            activity_ratio = _json_safe_float(day_row.get("activity_ratio"))
+            day_flags: list[str] = []
+            if activity_ratio >= SUSTAINED_RATIO_THRESHOLD:
+                day_flags.append("elevated")
+            if activity_ratio >= PERIODIC_SPIKE_RATIO_THRESHOLD:
+                day_flags.append("spike")
+            if int(day_row.get("daily_rare_resource_events", 0) or 0) > 0:
+                day_flags.append("rare_resources")
+
+            daily_bytes = _json_safe_float(day_row.get("daily_s3_read_bytes"))
+            daily_events = int(day_row.get("daily_s3_read_events", 0) or 0)
+            day_rows.append({
+                "date": pd.Timestamp(day_row["access_day"]).strftime("%Y-%m-%d"),
+                "activity_ratio": round(activity_ratio, 2),
+                "bytes_ratio": round(_json_safe_float(day_row.get("bytes_ratio")), 2),
+                "event_ratio": round(_json_safe_float(day_row.get("event_ratio")), 2),
+                "bytes": int(daily_bytes),
+                "expected_bytes": int(baseline_avg_daily_bytes),
+                "excess_bytes": int(max(0, daily_bytes - baseline_avg_daily_bytes)),
+                "events": daily_events,
+                "expected_events": round(baseline_avg_daily_events, 2),
+                "distinct_resources": int(day_row.get("daily_distinct_resources", 0) or 0),
+                "rare_resource_events": int(day_row.get("daily_rare_resource_events", 0) or 0),
+                "flags": day_flags,
+            })
+
+        elevated_day_rows = [d for d in day_rows if "elevated" in d["flags"]]
+        spike_day_rows = [d for d in day_rows if "spike" in d["flags"]]
+        final_window_rows = day_rows[-3:]
+        top_activity_rows = sorted(day_rows, key=lambda d: d["activity_ratio"], reverse=True)[:5]
+
+        contributing_dates = {
+            d["date"]
+            for d in elevated_day_rows
+            + spike_day_rows
+            + ([d for d in final_window_rows if final3_avg_ratio >= RAMP_FINAL_RATIO_THRESHOLD])
+            + top_activity_rows[:3]
+        }
+        contributing_day_rows = [d for d in day_rows if d["date"] in contributing_dates]
+
+        evidence_bits: list[str] = []
+        if elevated_day_rows:
+            evidence_bits.append(
+                f"{len(elevated_day_rows)} elevated day(s): "
+                f"{', '.join(d['date'] for d in elevated_day_rows[:8])}"
+            )
+        if spike_day_rows:
+            evidence_bits.append(
+                f"{len(spike_day_rows)} spike day(s): "
+                f"{', '.join(d['date'] for d in spike_day_rows[:8])}"
+            )
+        if final3_avg_ratio >= RAMP_FINAL_RATIO_THRESHOLD:
+            evidence_bits.append(
+                "final 3-day window stayed high: "
+                f"{', '.join(d['date'] for d in final_window_rows)}"
+            )
+        if top_activity_rows:
+            top = top_activity_rows[0]
+            evidence_bits.append(f"peak day {top['date']} reached {top['activity_ratio']:.2f}x baseline")
+
         rows.append({
             "alert_type": "time_based_low_and_slow_exfiltration",
             "cloud_account": cloud_account,
@@ -1054,6 +1125,17 @@ def time_based_s3_volume_features(
             "trend_slope_ratio_per_day": trend_slope,
             "total_distinct_resource_day_count": int(g["daily_distinct_resources"].sum()),
             "rare_resource_event_count": int(g["daily_rare_resource_events"].sum()),
+            "contributing_day_count": len(contributing_day_rows),
+            "contributing_days": "|".join(d["date"] for d in contributing_day_rows),
+            "elevated_day_dates": "|".join(d["date"] for d in elevated_day_rows),
+            "spike_day_dates": "|".join(d["date"] for d in spike_day_rows),
+            "final_window_days": "|".join(d["date"] for d in final_window_rows),
+            "top_activity_days": "|".join(
+                f"{d['date']}:{d['activity_ratio']:.2f}x" for d in top_activity_rows
+            ),
+            "time_evidence_summary": "; ".join(evidence_bits),
+            "daily_evidence_json": json.dumps(day_rows, separators=(",", ":")),
+            "contributing_day_evidence_json": json.dumps(contributing_day_rows, separators=(",", ":")),
             "daily_ratios": ",".join(f"{x:.2f}" for x in ratios.tolist()),
             "daily_bytes": ",".join(str(int(x)) for x in g["daily_s3_read_bytes"].tolist()),
         })
@@ -1359,6 +1441,15 @@ def format_output(alerts: pd.DataFrame) -> pd.DataFrame:
         "final3_avg_ratio",
         "trend_slope_ratio_per_day",
         "total_distinct_resource_day_count",
+        "contributing_day_count",
+        "contributing_days",
+        "elevated_day_dates",
+        "spike_day_dates",
+        "final_window_days",
+        "top_activity_days",
+        "time_evidence_summary",
+        "contributing_day_evidence_json",
+        "daily_evidence_json",
         "daily_ratios",
         "daily_bytes",
     ]
