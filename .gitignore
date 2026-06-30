@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated pipeline outputs
+output_*/
+ocsf_out/
+ocsf_out_v2/
+ocsf_out_v3/
+test_data/
+test_data_v2/
+test_data_v3/
+
+# Raw data / datasets
+botsv3/
+aws_raw_out_v4/
+incident/
+
+# Loose generated files (from old root-level runs)
+baselines.json
+incident_profiles.json
+risk_scores.json
+risk_report.html
+vpc_entities.json
+exfil_alerts.csv
