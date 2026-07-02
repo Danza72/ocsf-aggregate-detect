@@ -46,7 +46,7 @@ def _score_badge(score: float | None) -> str:
     if score is None:
         return '<span class="badge badge-na">—</span>'
     color = _score_color(score)
-    return f'<span class="badge" style="background:{color}">{score * 100:.0f}</span>'
+    return f'<span class="badge" style="background:{color};color:{"#333" if score < 0.4 else "#fff"}">{score * 100:.0f}</span>'
 
 
 def _dim_bar(val: float) -> str:
@@ -850,9 +850,11 @@ def _exfil_badge(score: float) -> str:
         bg = "#c0392b"
     elif score >= 40:
         bg = "#e67e22"
+    elif score >= 20:
+        bg = "#f1c40f"
     else:
-        bg = "#7f8c8d"
-    return f'<span class="badge" style="background:{bg}">{score:.0f}</span>'
+        bg = "#27ae60"
+    return f'<span class="badge" style="background:{bg};color:{"#333" if score < 40 else "#fff"}">{score:.0f}</span>'
 
 
 def _build_eni_map() -> dict:
@@ -925,11 +927,13 @@ def _session_badge(score: float) -> str:
         return '<span class="badge badge-na">—</span>'
     if score >= 70:
         color = "#c0392b"
-    elif score >= 35:
+    elif score >= 40:
         color = "#e67e22"
+    elif score >= 20:
+        color = "#f1c40f"
     else:
         color = "#27ae60"
-    return f'<span class="badge" style="background:{color}">{score:.0f}</span>'
+    return f'<span class="badge" style="background:{color};color:{"#333" if score < 40 else "#fff"}">{score:.0f}</span>'
 
 
 def _parse_json_list(value) -> list:
