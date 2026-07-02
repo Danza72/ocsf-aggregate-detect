@@ -316,3 +316,100 @@ detection layers simultaneously.
 `oscar_ransomprep` is an intentional gap demonstrating that UEBA alone cannot
 catch an attacker who uses only known operations from a known IP at high
 volume. A sequence or graph-based detector is required.
+
+---
+
+## Basic Dataset — Operation Data Grab (Extended)
+
+The original 10-actor dataset from `generate_test_dataset.py`. Designed to
+validate each detection layer in isolation — one actor per pattern, no noise,
+clean ground truth.
+
+**Baseline:** Jul 21 – Aug 19 (30 days) | **Incident:** Aug 20 – Sep 2 (14 days)
+
+### True Positives
+
+**`alice_m` — Stolen Credentials**
+Marketing analyst, normally 9am–4pm in `us-east-1` from `203.10.1.10`.
+On day 0 the attacker logs in from `185.220.101.5` in `ap-southeast-1` at
+2–4am — new region, new IP, IAM ops (`CreateUser`, `AttachUserPolicy`,
+`DeleteBucketPolicy`), 200 S3 events (~500MB) from finance/ML/backup buckets,
+500 VPC flows to three external IPs on ports 443/8080/4444 (~800MB).
+All three UEBA sources fire simultaneously. **Score ~0.87.**
+
+**`dave_f` — Suspicious Hours + New Resource**
+Finance analyst, normally 9am–2pm from `203.10.1.40` on `finance-data` only.
+On day 0 he accesses `finance-data` and a new bucket `finance-exports` at
+1–3am, running `PutObject` (new operation). Same IP, small volume.
+UEBA fires on `low_frequency_hour`, `new_resource`, `new_operation`.
+**Score 0.25–0.70 — suspicious, flags for analyst review.**
+
+**`oscar_r` — Sequence Attack (UEBA Blind Spot)**
+Developer whose baseline already contains all of:
+`GetObject`, `ListBuckets`, `DescribeInstances`, `GetSecretValue`,
+`PutObject`, `CreateAccessKey` across known resources.
+On day 0 at 9am he runs a tight 20-minute kill chain — all known ops,
+all known resources, same IP, same region:
+
+```
+t+01m  DescribeInstances   dev-server-1   (recon)
+t+05m  GetSecretValue      app-secrets    (credential theft)
+t+12m  CreateAccessKey     analytics-data (persistence)
+t+19m  PutObject           dev-exports    (exfil)
+```
+
+**UEBA score ~0.20 — missed.** Zero novelty in any dimension.
+Only a sequence detector watching API call ordering within a session catches this.
+
+**`mallory_t` — Steady 3× S3 Exfiltration**
+Compliance analyst, baseline ~15 S3 reads/day on `compliance-reports`.
+Every incident day she reads at exactly 3× baseline — same ops, same buckets,
+same IP, same hours. Each day looks only mildly elevated.
+**Caught by time-based exfil** (`sustained_elevation`, 14 consecutive days at
+constant 3×). UEBA misses every single day.
+
+**`neil_k` — Gradual Ramp**
+Analytics engineer, baseline ~12 S3 reads/day on `analytics-data`.
+Ramps over the incident window:
+- Days 0–3: 1.5× (~18/day)
+- Days 4–7: 2.5× (~30/day)
+- Days 8–13: 4× (~48/day)
+
+No single day triggers UEBA. **Caught by time-based exfil** (`ramp_up` —
+trend slope detection across the full window).
+
+**`petra_v` — Periodic Spikes**
+Reporting analyst, baseline ~10 S3 events/day on `reports-data`.
+Spikes to 5× on days 0, 2, 5, 8, 11, 13 — normal volume on all other days.
+Each spike day is below the UEBA threshold individually.
+**Caught by time-based exfil** (`periodic_spikes` — cumulative pattern across
+the window).
+
+### Benign
+
+| Actor | Role | Why it stays clean |
+|---|---|---|
+| `bob_d` | DevOps engineer | Same IP/region/ops/VPC destinations all 14 days |
+| `carol_s` | Data scientist | High S3 volume but consistent with baseline |
+| `svc_backup` | Nightly backup | 2–3am PutObject to `backup-bucket` — perfectly predictable |
+| `svc_monthly` | Monthly archival | Runs Aug 1 in baseline → Aug 20 incident day looks identical. **Requires 30-day baseline** — a 14-day window misses the Aug 1 run and would false-positive on Aug 20. |
+
+### Detection coverage
+
+| Actor | UEBA | Sequence | Time-Based | Result |
+|---|---|---|---|---|
+| `alice_m` | ✓ ~0.87 | — | — | Malicious |
+| `dave_f` | ✓ ~0.35 | — | — | Suspicious |
+| `oscar_r` | ✗ ~0.20 | Would catch | — | **UEBA blind spot** |
+| `mallory_t` | ✗ | — | ✓ sustained 3× | Malicious |
+| `neil_k` | ✗ | — | ✓ ramp | Malicious |
+| `petra_v` | ✗ | — | ✓ periodic spikes | Malicious |
+| `bob_d` | ✗ | — | — | Benign |
+| `carol_s` | ✗ | — | — | Benign |
+| `svc_backup` | ✗ | — | — | Benign |
+| `svc_monthly` | ✗ | — | — | Benign (needs 30-day baseline) |
+
+Each attacker exploits a gap the previous one exposed: alice_m is obvious to
+UEBA; mallory/neil/petra are invisible to UEBA but visible over time; oscar is
+invisible to both — left deliberately as the motivation for a future sequence
+detection layer.
