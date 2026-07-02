@@ -20,11 +20,27 @@ Each source computes a score from independent behavioral dimensions. The final
 score is the **max across sources** so the strongest evidence channel drives
 the result, and an actor missing a source is not penalised.
 
-| Source | Dimensions |
-|---|---|
-| **CloudTrail** | `new_operation`, `new_resource`, `new_region`, `volume_zscore`, `new_ip_known_region`, `low_frequency_hour` |
-| **S3** | `new_operation`, `new_bucket`, `new_src_ip`, `error_rate`, `bytes_zscore`, `event_zscore` |
-| **VPC** | `new_dst_ip`, `new_dst_port`, `reject_ratio`, `bytes_zscore`, `flow_zscore`, `new_protocol` |
+**CloudTrail** — weighted sum (weights reflect impact on final score):
+
+| Dimension | Weight | What it detects |
+|---|---|---|
+| `new_operation` | **25%** | API call never seen in baseline |
+| `new_resource` | **20%** | AWS resource never accessed before |
+| `new_region` | **20%** | AWS region never used in baseline |
+| `volume_zscore` | **15%** | Hourly event count statistically abnormal |
+| `new_ip_known_region` | **10%** | New source IP in a familiar region (IP rotation) |
+| `low_frequency_hour` | **10%** | Activity at an hour rare or absent in baseline |
+
+**S3 and VPC** — equal-weight (each dimension is 1/6 ≈ 16.7%):
+
+| S3 Dimension | VPC Dimension | What it detects |
+|---|---|---|
+| `new_operation` | `new_dst_ip` | New API operation / new destination IP |
+| `new_bucket` | `new_dst_port` | Bucket never accessed / port never seen |
+| `new_src_ip` | `reject_ratio` | New source IP / REJECT rate above baseline |
+| `error_rate` | `bytes_zscore` | Non-2xx response rate / abnormal bytes volume |
+| `bytes_zscore` | `flow_zscore` | Abnormal total bytes / abnormal flow count |
+| `event_zscore` | `new_protocol` | Abnormal event count / new network protocol |
 
 **What it catches:**
 - Stolen credentials from a new IP, region, or at unusual hours
