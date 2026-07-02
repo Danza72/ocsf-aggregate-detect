@@ -147,7 +147,7 @@ def run_session_detection(ocsf_dir: Path, out_dir: Path) -> None:
         "num_events", "duration_minutes",
         "session_risk_score", "sequence_rarity_score", "suspicious_chain_score",
         "timing_burst_score", "feature_deviation_score", "sensitive_action_score",
-        "risk_explanation",
+        "risk_explanation", "flagged_api_sequences",
     ]].to_csv(str(top_csv), index=False)
 
     print(f"  Session detection: {len(scored)} sessions scored -> {top_csv}")

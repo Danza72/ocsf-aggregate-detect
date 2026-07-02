@@ -846,15 +846,16 @@ def _day_tab_html(date_str: str, scores: dict,
 def _exfil_badge(score: float) -> str:
     if score <= 0:
         return '<span class="badge badge-na">—</span>'
-    if score >= 70:
+    displayed = round(score)
+    if displayed >= 70:
         bg = "#c0392b"
-    elif score >= 40:
+    elif displayed >= 40:
         bg = "#e67e22"
     elif score >= 20:
         bg = "#f1c40f"
     else:
-        bg = "#27ae60"
-    return f'<span class="badge" style="background:{bg};color:{"#333" if score < 40 else "#fff"}">{score:.0f}</span>'
+        bg = "#7f8c8d"
+    return f'<span class="badge" style="background:{bg}">{displayed}</span>'
 
 
 def _build_eni_map() -> dict:
@@ -925,15 +926,16 @@ def _load_session_df():
 def _session_badge(score: float) -> str:
     if score <= 0:
         return '<span class="badge badge-na">—</span>'
-    if score >= 70:
+    displayed = round(score)
+    if displayed >= 70:
         color = "#c0392b"
-    elif score >= 40:
+    elif displayed >= 40:
         color = "#e67e22"
     elif score >= 20:
         color = "#f1c40f"
     else:
         color = "#27ae60"
-    return f'<span class="badge" style="background:{color};color:{"#333" if score < 40 else "#fff"}">{score:.0f}</span>'
+    return f'<span class="badge" style="background:{color}">{displayed}</span>'
 
 
 def _parse_json_list(value) -> list:
@@ -1063,7 +1065,7 @@ def _findings_tab_html(all_scores: dict) -> str:
         n = exfil_by_actor.get(a, {}).get("net",  0)
         t = exfil_by_actor.get(a, {}).get("time", 0)
         k = session_by_actor.get(a, 0)
-        flags = (1 if u >= 0.4 else 0) + (1 if n >= 40 else 0) + (1 if t >= 40 else 0) + (1 if k >= 35 else 0)
+        flags = (1 if u >= 0.4 else 0) + (1 if n >= 40 else 0) + (1 if t >= 40 else 0) + (1 if k >= 40 else 0)
         return (-flags, -max(u, n / 100, t / 100, k / 100))
 
     all_actors.sort(key=_sort_key)
@@ -1078,7 +1080,7 @@ def _findings_tab_html(all_scores: dict) -> str:
     )
     session_note = (
         '<p style="font-size:12px;color:#7f8c8d;margin:4px 0 12px">'
-        'Session score 0–100 &nbsp;|&nbsp; Red ≥ 70 &nbsp;|&nbsp; Amber ≥ 35 &nbsp;—&nbsp; '
+        'Session score 0–100 &nbsp;|&nbsp; Red ≥ 70 &nbsp;|&nbsp; Amber ≥ 40 &nbsp;—&nbsp; '
         'see <strong>Session Detection</strong> tab for kill-chain detail</p>'
         if session_loaded else
         '<p style="font-size:12px;color:#e67e22;margin:4px 0 12px">'
@@ -1095,7 +1097,7 @@ def _findings_tab_html(all_scores: dict) -> str:
         time  = ex.get("time", 0.0)
         sess  = session_by_actor.get(actor, 0.0)
 
-        flags = (1 if u >= 0.4 else 0) + (1 if net >= 40 else 0) + (1 if time >= 40 else 0) + (1 if sess >= 35 else 0)
+        flags = (1 if u >= 0.4 else 0) + (1 if net >= 40 else 0) + (1 if time >= 40 else 0) + (1 if sess >= 40 else 0)
         total = 4 if session_loaded else 3
         if flags == total:
             fp = f'<span style="background:#c0392b;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">ALL {total}</span>'
@@ -1334,8 +1336,12 @@ def _session_tab_html() -> str:
                 '<p style="color:#27ae60">No risky sessions detected.</p></section>')
 
     _TH = 'style="background:#2c3e50;color:#fff;padding:8px 10px;text-align:center;white-space:nowrap;font-size:12px"'
+
+    modal_data_js = "const _sessionDetails = {};\n"
     rows_html = ""
-    for _, row in df.iterrows():
+    modal_entries = {}
+
+    for idx, (_, row) in enumerate(df.iterrows()):
         actor   = str(row.get("identity_id", ""))
         start   = str(row.get("session_start", ""))[:16].replace("T", " ")
         end     = str(row.get("session_end",   ""))[:16].replace("T", " ")
@@ -1347,7 +1353,10 @@ def _session_tab_html() -> str:
         timing  = float(row.get("timing_burst_score",        0) or 0)
         deviat  = float(row.get("feature_deviation_score",   0) or 0)
         sensit  = float(row.get("sensitive_action_score",    0) or 0)
-        expl    = html.escape(str(row.get("risk_explanation", "") or ""))
+        expl    = str(row.get("risk_explanation", "") or "")
+        flagged = str(row.get("flagged_api_sequences", "") or "")
+
+        modal_entries[idx] = {"expl": expl, "flagged": flagged, "actor": actor, "risk": risk}
 
         def _mini_bar(val, max_val):
             pct = int(min(val / max_val * 100, 100))
@@ -1356,7 +1365,8 @@ def _session_tab_html() -> str:
                     f'<div style="background:{color};height:100%;width:{pct}%;border-radius:3px"></div></div>'
                     f'<span style="font-size:11px;margin-left:4px">{val:.0f}</span>')
 
-        risk_color = "#c0392b" if risk >= 70 else ("#e67e22" if risk >= 35 else "#27ae60")
+        risk_r = round(risk)
+        risk_color = "#c0392b" if risk_r >= 70 else ("#e67e22" if risk_r >= 40 else "#27ae60")
         rows_html += f"""
 <tr style="border-bottom:1px solid #eee">
   <td style="padding:8px 10px;font-weight:600;white-space:nowrap">{actor}</td>
@@ -1371,15 +1381,113 @@ def _session_tab_html() -> str:
   <td style="padding:8px 10px">{_mini_bar(timing, 20)}</td>
   <td style="padding:8px 10px">{_mini_bar(deviat, 15)}</td>
   <td style="padding:8px 10px">{_mini_bar(sensit, 10)}</td>
-  <td style="padding:8px 10px;font-size:11px;color:#555;max-width:300px">{expl}</td>
+  <td style="padding:8px 10px;text-align:center">
+    <button onclick="openSessionModal({idx})"
+      style="background:#2c3e50;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap">
+      Details ▶
+    </button>
+  </td>
 </tr>"""
 
+    # build JS data object — escape for embedding in a JS string literal
+    import json as _json
+    modal_data_js = "const _sessionDetails = " + _json.dumps(modal_entries) + ";\n"
+
     return f"""
+<style>
+#sessionModal {{
+  display:none;position:fixed;z-index:9999;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,0.5);align-items:center;justify-content:center;
+}}
+#sessionModal.open {{ display:flex; }}
+#sessionModalBox {{
+  background:#fff;border-radius:8px;max-width:680px;width:90%;max-height:80vh;
+  overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);
+  display:flex;flex-direction:column;
+}}
+#sessionModalHeader {{
+  background:#2c3e50;color:#fff;padding:14px 18px;border-radius:8px 8px 0 0;
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:14px;font-weight:600;flex-shrink:0;
+}}
+#sessionModalBody {{ padding:18px;font-size:13px; }}
+.smd-section-title {{
+  font-weight:700;color:#2c3e50;margin:14px 0 6px;font-size:12px;
+  text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #ecf0f1;padding-bottom:4px;
+}}
+.smd-explanation {{ color:#444;line-height:1.6;margin-bottom:4px; }}
+.smd-flag-item {{
+  background:#f8f9fa;border-left:3px solid #2c3e50;border-radius:0 4px 4px 0;
+  padding:5px 10px;margin:4px 0;font-family:monospace;font-size:11.5px;color:#333;
+  word-break:break-word;
+}}
+.smd-flag-item.chain    {{ border-left-color:#c0392b; }}
+.smd-flag-item.rare     {{ border-left-color:#8e44ad; }}
+.smd-flag-item.timing   {{ border-left-color:#e67e22; }}
+.smd-flag-item.deviate  {{ border-left-color:#2980b9; }}
+.smd-flag-item.sensitive{{ border-left-color:#16a085; }}
+.smd-flag-none {{ color:#999;font-style:italic; }}
+</style>
+
+<div id="sessionModal">
+  <div id="sessionModalBox">
+    <div id="sessionModalHeader">
+      <span id="sessionModalTitle">Session Details</span>
+      <button onclick="closeSessionModal()"
+        style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <div id="sessionModalBody"></div>
+  </div>
+</div>
+
+<script>
+{modal_data_js}
+function openSessionModal(idx) {{
+  const d = _sessionDetails[idx];
+  const riskR = Math.round(d.risk);
+  const riskColor = riskR >= 70 ? "#c0392b" : (riskR >= 40 ? "#e67e22" : "#27ae60");
+  document.getElementById("sessionModalTitle").innerHTML =
+    d.actor + ' &nbsp;<span style="background:' + riskColor +
+    ';color:#fff;border-radius:4px;padding:1px 8px;font-size:12px">' + Math.round(d.risk) + '</span>';
+
+  let flaggedHtml = "";
+  if (d.flagged && d.flagged !== "none" && d.flagged.trim() !== "") {{
+    const parts = d.flagged.split(" | ");
+    parts.forEach(p => {{
+      let cls = "smd-flag-item";
+      if (p.startsWith("CHAIN") || p.startsWith("TRIPLE") || p.startsWith("EVENT_PAIR") ||
+          p.startsWith("BULK") || p.startsWith("DEFENSE"))       cls += " chain";
+      else if (p.startsWith("RARE"))                              cls += " rare";
+      else if (p.startsWith("FAST") || p.startsWith("BURST"))    cls += " timing";
+      else if (p.startsWith("DEVIATION"))                         cls += " deviate";
+      else if (p.startsWith("SENSITIVE") || p.startsWith("HIGH"))cls += " sensitive";
+      flaggedHtml += '<div class="' + cls + '">' + p + '</div>';
+    }});
+  }} else {{
+    flaggedHtml = '<span class="smd-flag-none">No specific API sequences flagged.</span>';
+  }}
+
+  document.getElementById("sessionModalBody").innerHTML =
+    '<div class="smd-section-title">Risk Summary</div>' +
+    '<div class="smd-explanation">' + d.expl + '</div>' +
+    '<div class="smd-section-title">Flagged API Sequences</div>' +
+    flaggedHtml;
+
+  document.getElementById("sessionModal").classList.add("open");
+}}
+function closeSessionModal() {{
+  document.getElementById("sessionModal").classList.remove("open");
+}}
+document.getElementById("sessionModal").addEventListener("click", function(e) {{
+  if (e.target === this) closeSessionModal();
+}});
+</script>
+
 <section>
   <h2>Session Detection — {DATE_RANGE_START} → {DATE_RANGE_END}</h2>
   <p style="font-size:12px;color:#7f8c8d;margin:4px 0 8px">
     Kill-chain sequence analysis. Sessions scored globally against the 30-day baseline.
-    Score 0–100 &nbsp;|&nbsp; Red ≥ 70 (high) &nbsp;|&nbsp; Amber ≥ 35 (medium).
+    Score 0–100 &nbsp;|&nbsp; Red ≥ 70 (high) &nbsp;|&nbsp; Amber ≥ 40 (medium).
     Sub-scores: <strong>Rarity</strong>/25 &nbsp;|&nbsp; <strong>Chain</strong>/30 &nbsp;|&nbsp;
     <strong>Timing</strong>/20 &nbsp;|&nbsp; <strong>Deviation</strong>/15 &nbsp;|&nbsp; <strong>Sensitive</strong>/10
   </p>
@@ -1397,7 +1505,7 @@ def _session_tab_html() -> str:
         <th {_TH}>Timing /20</th>
         <th {_TH}>Deviation /15</th>
         <th {_TH}>Sensitive /10</th>
-        <th {_TH}>Explanation</th>
+        <th {_TH}>Details</th>
       </tr>
     </thead>
     <tbody>{rows_html}</tbody>
