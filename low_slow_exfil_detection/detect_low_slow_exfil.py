@@ -54,6 +54,8 @@ MIN_DURATION_HOURS = 6
 MIN_SMALL_TRANSFER_RATIO = 0.80
 REGULAR_INTERVAL_CV = 0.25                    # lower = more regular
 ALERT_SCORE_THRESHOLD = 60
+MAX_NETWORK_RAW_SCORE = 170
+MAX_TIME_BASED_RAW_SCORE = 155
 
 # Time-based S3/data-access analytics.
 SUSTAINED_RATIO_THRESHOLD = 2.5              # Mallory-style steady elevation
@@ -65,6 +67,12 @@ PERIODIC_SPIKE_RATIO_THRESHOLD = 4.0         # Petra-style spike days
 PERIODIC_SPIKE_MIN_DAYS = 4
 CUMULATIVE_EXCESS_RATIO_THRESHOLD = 2.0
 CUMULATIVE_EXCESS_MIN_BYTES = 100 * 1024 * 1024
+
+
+def normalize_score(raw_score: float, max_score: float) -> float:
+    if max_score <= 0:
+        return 0.0
+    return round(min(max(float(raw_score), 0.0), max_score) / max_score * 100.0, 2)
 
 
 
@@ -1258,7 +1266,9 @@ def score_time_based_alerts(features: pd.DataFrame) -> pd.DataFrame:
         detection_types.append("|".join(row_types) if row_types else "time_anomaly_weak_signal")
 
     out["alert_family"] = "time_based"
-    out["time_based_risk_score"] = scores
+    out["time_based_risk_score"] = [
+        normalize_score(score, MAX_TIME_BASED_RAW_SCORE) for score in scores
+    ]
     out["network_risk_score"] = 0
     out["combined_risk_score"] = out[["network_risk_score", "time_based_risk_score"]].max(axis=1)
     out["risk_score"] = out["combined_risk_score"]  # backwards-compatible alias
@@ -1374,7 +1384,9 @@ def score_alerts(features: pd.DataFrame, profiles: dict[str, Any]) -> pd.DataFra
         reasons.append("; ".join(row_reasons))
 
     out["alert_family"] = "network"
-    out["network_risk_score"] = scores
+    out["network_risk_score"] = [
+        normalize_score(score, MAX_NETWORK_RAW_SCORE) for score in scores
+    ]
     out["time_based_risk_score"] = 0
     out["combined_risk_score"] = out[["network_risk_score", "time_based_risk_score"]].max(axis=1)
     out["risk_score"] = out["combined_risk_score"]  # backwards-compatible alias
