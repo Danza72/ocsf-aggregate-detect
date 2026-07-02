@@ -53,6 +53,9 @@ MIN_EVENT_COUNT = 20
 MIN_DURATION_HOURS = 6
 MIN_SMALL_TRANSFER_RATIO = 0.80
 REGULAR_INTERVAL_CV = 0.25                    # lower = more regular
+JITTERED_INTERVAL_CV = 0.35
+INTERVAL_BAND_TOLERANCE = 0.35
+MIN_INTERVAL_BAND_RATIO = 0.80
 ALERT_SCORE_THRESHOLD = 60
 MAX_NETWORK_RAW_SCORE = 170
 MAX_TIME_BASED_RAW_SCORE = 155
@@ -73,6 +76,15 @@ def normalize_score(raw_score: float, max_score: float) -> float:
     if max_score <= 0:
         return 0.0
     return round(min(max(float(raw_score), 0.0), max_score) / max_score * 100.0, 2)
+
+
+def interval_median_band_ratio(values: pd.Series) -> float:
+    median = values.median()
+    if pd.isna(median) or median <= 0:
+        return np.nan
+    lower = median * (1 - INTERVAL_BAND_TOLERANCE)
+    upper = median * (1 + INTERVAL_BAND_TOLERANCE)
+    return float(values.between(lower, upper, inclusive="both").mean())
 
 
 
@@ -728,6 +740,7 @@ def timing_features(current: pd.DataFrame) -> pd.DataFrame:
             min_interval_seconds=("delta_seconds", "min"),
             max_interval_seconds=("delta_seconds", "max"),
             interval_count=("delta_seconds", "count"),
+            interval_median_band_ratio=("delta_seconds", interval_median_band_ratio),
         )
         .reset_index()
     )
@@ -735,6 +748,8 @@ def timing_features(current: pd.DataFrame) -> pd.DataFrame:
     features["interval_cv"] = (
         features["std_interval_seconds"] / features["mean_interval_seconds"]
     ).replace([np.inf, -np.inf], np.nan)
+
+    features["interval_band_tolerance"] = INTERVAL_BAND_TOLERANCE
 
     return features
 
@@ -1364,9 +1379,26 @@ def score_alerts(features: pd.DataFrame, profiles: dict[str, Any]) -> pd.DataFra
 
         interval_cv = row.get("interval_cv")
         interval_count = row.get("interval_count", 0)
+        interval_band_ratio = row.get("interval_median_band_ratio")
         if pd.notna(interval_cv) and interval_count >= 10 and interval_cv <= REGULAR_INTERVAL_CV:
             score += 15
             row_reasons.append(f"regular timing pattern, interval_cv={interval_cv:.2f}")
+        elif (
+            pd.notna(interval_cv)
+            and interval_count >= 10
+            and interval_cv <= JITTERED_INTERVAL_CV
+            and pd.notna(interval_band_ratio)
+            and interval_band_ratio >= MIN_INTERVAL_BAND_RATIO
+        ):
+            score += 15
+            median_interval = row.get("median_interval_seconds")
+            median_minutes = float(median_interval) / 60 if pd.notna(median_interval) else 0
+            row_reasons.append(
+                "jittered regular timing pattern: "
+                f"median_interval={median_minutes:.1f} min, "
+                f"interval_cv={interval_cv:.2f}, "
+                f"{interval_band_ratio:.0%} within +/-{INTERVAL_BAND_TOLERANCE:.0%} of median"
+            )
 
         if row.get("get_object_count", 0) >= 50:
             score += 15
@@ -1425,6 +1457,8 @@ def format_output(alerts: pd.DataFrame) -> pd.DataFrame:
         "rare_user_agent_ratio",
         "interval_cv",
         "median_interval_seconds",
+        "interval_median_band_ratio",
+        "interval_band_tolerance",
         "s3_event_count",
         "get_object_count",
         "list_bucket_count",

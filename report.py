@@ -1265,6 +1265,7 @@ def _exfil_tab_html() -> str:
                 dur      = _fv(nr, "duration_hours",   "float1")
                 s_ratio  = _fv(nr, "small_transfer_ratio", "pct")
                 iv_cv    = _fv(nr, "interval_cv",      "float2")
+                band_pct = _fv(nr, "interval_median_band_ratio", "pct")
                 rsn      = str(nr.get("alert_reasons", "") or "—")
                 dest_rows += f"""
 <tr style="border-bottom:1px solid #eee">
@@ -1275,6 +1276,7 @@ def _exfil_tab_html() -> str:
   <td style="padding:8px 10px;text-align:right">{dur} hrs</td>
   <td style="padding:8px 10px;text-align:right">{s_ratio}</td>
   <td style="padding:8px 10px;text-align:right">{iv_cv}</td>
+  <td style="padding:8px 10px;text-align:right">{band_pct}</td>
   <td style="padding:8px 10px;font-size:11px;color:#555;max-width:300px">{rsn}</td>
 </tr>"""
             th_s = 'style="background:#ecf0f1;padding:6px 10px;text-align:center;font-size:11px;white-space:nowrap;border-bottom:2px solid #bdc3c7"'
@@ -1295,6 +1297,7 @@ def _exfil_tab_html() -> str:
         <th {th_s}>Duration</th>
         <th {th_s}>Small Xfer %</th>
         <th {th_s}>Interval CV</th>
+        <th {th_s}>In-band %</th>
         <th {th_s} style="text-align:left">Alert Reasons</th>
       </tr></thead>
       <tbody>{dest_rows}</tbody>
