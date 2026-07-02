@@ -23,6 +23,7 @@ DATE_RANGE_END     = None   # set by runner when analysing a date range
 RANGE_DATES        = []     # ordered list of all dates in the range
 OUT_DIR            = None   # output directory path for loading daily files
 EXFIL_FILE         = None   # path to exfil_alerts.csv produced by detect_low_slow_exfil
+SESSION_FILE       = None   # path to top_risky_sessions.csv produced by session detection
 
 CT_DIMS  = ["new_operation", "new_resource", "new_region",
             "volume_zscore", "new_ip_known_region", "low_frequency_hour"]
@@ -909,6 +910,28 @@ def _load_exfil_df():
         return None
 
 
+def _load_session_df():
+    if not SESSION_FILE or not Path(SESSION_FILE).exists():
+        return None
+    try:
+        import pandas as pd
+        return pd.read_csv(SESSION_FILE)
+    except Exception:
+        return None
+
+
+def _session_badge(score: float) -> str:
+    if score <= 0:
+        return '<span class="badge badge-na">—</span>'
+    if score >= 70:
+        color = "#c0392b"
+    elif score >= 35:
+        color = "#e67e22"
+    else:
+        color = "#27ae60"
+    return f'<span class="badge" style="background:{color}">{score:.0f}</span>'
+
+
 def _parse_json_list(value) -> list:
     if value is None or str(value).strip() in ("", "nan", "None"):
         return []
@@ -1017,24 +1040,45 @@ def _findings_tab_html(all_scores: dict) -> str:
             exfil_by_actor[actor]["net"]  = max(exfil_by_actor[actor]["net"],  net)
             exfil_by_actor[actor]["time"] = max(exfil_by_actor[actor]["time"], time)
 
-    all_actors = sorted(set(peak_ueba) | set(exfil_by_actor))
+    session_by_actor: dict[str, float] = {}
+    session_loaded = False
+    sdf = _load_session_df()
+    if sdf is not None:
+        session_loaded = True
+        for _, row in sdf.iterrows():
+            actor = str(row.get("identity_id", "") or "")
+            if not actor or actor in ("nan", "unknown"):
+                continue
+            score = float(row.get("session_risk_score", 0) or 0)
+            session_by_actor[actor] = max(session_by_actor.get(actor, 0), score)
+
+    all_actors = sorted(set(peak_ueba) | set(exfil_by_actor) | set(session_by_actor))
 
     def _sort_key(a):
         u = peak_ueba.get(a, 0)
         n = exfil_by_actor.get(a, {}).get("net",  0)
         t = exfil_by_actor.get(a, {}).get("time", 0)
-        flags = (1 if u >= 0.4 else 0) + (1 if n >= 40 else 0) + (1 if t >= 40 else 0)
-        return (-flags, -max(u, n / 100, t / 100))
+        k = session_by_actor.get(a, 0)
+        flags = (1 if u >= 0.4 else 0) + (1 if n >= 40 else 0) + (1 if t >= 40 else 0) + (1 if k >= 35 else 0)
+        return (-flags, -max(u, n / 100, t / 100, k / 100))
 
     all_actors.sort(key=_sort_key)
 
     exfil_note = (
-        '<p style="font-size:12px;color:#7f8c8d;margin:4px 0 12px">'
+        '<p style="font-size:12px;color:#7f8c8d;margin:4px 0 4px">'
         'Exfil scores 0–100 &nbsp;|&nbsp; Red ≥ 70 &nbsp;|&nbsp; Amber ≥ 40 &nbsp;—&nbsp; '
         'see <strong>Exfil Detection</strong> tab for full detail</p>'
         if exfil_loaded else
-        '<p style="font-size:12px;color:#e67e22;margin:4px 0 12px">'
+        '<p style="font-size:12px;color:#e67e22;margin:4px 0 4px">'
         '⚠ Exfil alerts not available — run pipeline to generate exfil_alerts.csv</p>'
+    )
+    session_note = (
+        '<p style="font-size:12px;color:#7f8c8d;margin:4px 0 12px">'
+        'Session score 0–100 &nbsp;|&nbsp; Red ≥ 70 &nbsp;|&nbsp; Amber ≥ 35 &nbsp;—&nbsp; '
+        'see <strong>Session Detection</strong> tab for kill-chain detail</p>'
+        if session_loaded else
+        '<p style="font-size:12px;color:#e67e22;margin:4px 0 12px">'
+        '⚠ Session data not available — run pipeline to generate top_risky_sessions.csv</p>'
     )
 
     _SB = "border-right:2px solid #bdc3c7;"
@@ -1045,29 +1089,36 @@ def _findings_tab_html(all_scores: dict) -> str:
         ex    = exfil_by_actor.get(actor, {})
         net   = ex.get("net",  0.0)
         time  = ex.get("time", 0.0)
+        sess  = session_by_actor.get(actor, 0.0)
 
-        flags = (1 if u >= 0.4 else 0) + (1 if net >= 40 else 0) + (1 if time >= 40 else 0)
-        if flags == 3:
-            fp = '<span style="background:#c0392b;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">ALL 3</span>'
-        elif flags == 2:
-            fp = '<span style="background:#e67e22;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">2 / 3</span>'
+        flags = (1 if u >= 0.4 else 0) + (1 if net >= 40 else 0) + (1 if time >= 40 else 0) + (1 if sess >= 35 else 0)
+        total = 4 if session_loaded else 3
+        if flags == total:
+            fp = f'<span style="background:#c0392b;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">ALL {total}</span>'
+        elif flags >= 2:
+            fp = f'<span style="background:#e67e22;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">{flags} / {total}</span>'
         elif flags == 1:
-            fp = '<span style="background:#7f8c8d;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">1 / 3</span>'
+            fp = f'<span style="background:#7f8c8d;color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">1 / {total}</span>'
         else:
-            fp = '<span style="background:#ecf0f1;color:#95a5a6;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">0 / 3</span>'
+            fp = f'<span style="background:#ecf0f1;color:#95a5a6;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">0 / {total}</span>'
 
         ueba_cell = (f'{_score_badge(u)}<br><small style="color:#95a5a6;font-size:10px">{u_day[5:]}</small>'
                      if u > 0 else '<span class="badge badge-na">—</span>')
+        sess_cell = _session_badge(sess) if session_loaded else ''
+
+        sess_col = f'<td style="text-align:center;padding:8px 12px;{_SB}">{sess_cell}</td>' if session_loaded else ''
 
         rows += (f'<tr>'
                  f'<td style="font-weight:600;white-space:nowrap;padding:8px 12px;{_SB}">{actor}</td>'
                  f'<td style="text-align:center;padding:8px 12px;{_SB}">{ueba_cell}</td>'
                  f'<td style="text-align:center;padding:8px 12px;{_SB}">{_exfil_badge(net)}</td>'
                  f'<td style="text-align:center;padding:8px 12px;{_SB}">{_exfil_badge(time)}</td>'
+                 f'{sess_col}'
                  f'<td style="text-align:center;padding:8px 12px">{fp}</td>'
                  f'</tr>\n')
 
     th = 'style="background:#2c3e50;color:#fff;padding:8px 12px;text-align:center;white-space:nowrap"'
+    sess_th = f'<th {th} style="border-right:2px solid #bdc3c7">Session Risk</th>' if session_loaded else ''
     return f"""
 <section>
   <h2>Findings — {DATE_RANGE_START} → {DATE_RANGE_END}</h2>
@@ -1075,6 +1126,7 @@ def _findings_tab_html(all_scores: dict) -> str:
     UEBA: behavioural deviation (0–1) &nbsp;|&nbsp; Red ≥ 0.7 &nbsp;|&nbsp; Amber ≥ 0.4
   </p>
   {exfil_note}
+  {session_note}
   <table style="border-collapse:collapse;width:100%;font-size:13px;border:1px solid #dee2e6">
     <thead>
       <tr>
@@ -1082,6 +1134,7 @@ def _findings_tab_html(all_scores: dict) -> str:
         <th {th} style="border-right:2px solid #bdc3c7">UEBA Peak</th>
         <th {th} style="border-right:2px solid #bdc3c7">Network Exfil</th>
         <th {th} style="border-right:2px solid #bdc3c7">Time-based Exfil</th>
+        {sess_th}
         <th {th}>Signals</th>
       </tr>
     </thead>
@@ -1266,6 +1319,89 @@ def _exfil_tab_html() -> str:
 </section>"""
 
 
+def _session_tab_html() -> str:
+    df = _load_session_df()
+    if df is None:
+        return ('<section><h2>Session Detection</h2>'
+                '<p style="color:#e67e22">⚠ top_risky_sessions.csv not found — run the pipeline first.</p>'
+                '</section>')
+    if df.empty:
+        return ('<section><h2>Session Detection</h2>'
+                '<p style="color:#27ae60">No risky sessions detected.</p></section>')
+
+    _TH = 'style="background:#2c3e50;color:#fff;padding:8px 10px;text-align:center;white-space:nowrap;font-size:12px"'
+    rows_html = ""
+    for _, row in df.iterrows():
+        actor   = str(row.get("identity_id", ""))
+        start   = str(row.get("session_start", ""))[:16].replace("T", " ")
+        end     = str(row.get("session_end",   ""))[:16].replace("T", " ")
+        nevents = int(row.get("num_events", 0) or 0)
+        dur     = float(row.get("duration_minutes", 0) or 0)
+        risk    = float(row.get("session_risk_score",        0) or 0)
+        rarity  = float(row.get("sequence_rarity_score",     0) or 0)
+        chain   = float(row.get("suspicious_chain_score",    0) or 0)
+        timing  = float(row.get("timing_burst_score",        0) or 0)
+        deviat  = float(row.get("feature_deviation_score",   0) or 0)
+        sensit  = float(row.get("sensitive_action_score",    0) or 0)
+        expl    = html.escape(str(row.get("risk_explanation", "") or ""))
+
+        def _mini_bar(val, max_val):
+            pct = int(min(val / max_val * 100, 100))
+            color = "#c0392b" if pct >= 70 else ("#e67e22" if pct >= 40 else "#27ae60")
+            return (f'<div style="background:#ecf0f1;border-radius:3px;height:6px;width:60px;display:inline-block;vertical-align:middle">'
+                    f'<div style="background:{color};height:100%;width:{pct}%;border-radius:3px"></div></div>'
+                    f'<span style="font-size:11px;margin-left:4px">{val:.0f}</span>')
+
+        risk_color = "#c0392b" if risk >= 70 else ("#e67e22" if risk >= 35 else "#27ae60")
+        rows_html += f"""
+<tr style="border-bottom:1px solid #eee">
+  <td style="padding:8px 10px;font-weight:600;white-space:nowrap">{actor}</td>
+  <td style="padding:8px 10px;font-size:11px;white-space:nowrap;color:#555">{start}<br>{end}</td>
+  <td style="padding:8px 10px;text-align:center">{nevents}</td>
+  <td style="padding:8px 10px;text-align:center">{dur:.1f} min</td>
+  <td style="padding:8px 10px;text-align:center">
+    <span style="background:{risk_color};color:#fff;border-radius:4px;padding:2px 8px;font-weight:700">{risk:.0f}</span>
+  </td>
+  <td style="padding:8px 10px">{_mini_bar(rarity, 25)}</td>
+  <td style="padding:8px 10px">{_mini_bar(chain, 30)}</td>
+  <td style="padding:8px 10px">{_mini_bar(timing, 20)}</td>
+  <td style="padding:8px 10px">{_mini_bar(deviat, 15)}</td>
+  <td style="padding:8px 10px">{_mini_bar(sensit, 10)}</td>
+  <td style="padding:8px 10px;font-size:11px;color:#555;max-width:300px">{expl}</td>
+</tr>"""
+
+    return f"""
+<section>
+  <h2>Session Detection — {DATE_RANGE_START} → {DATE_RANGE_END}</h2>
+  <p style="font-size:12px;color:#7f8c8d;margin:4px 0 8px">
+    Kill-chain sequence analysis. Sessions scored globally against the 30-day baseline.
+    Score 0–100 &nbsp;|&nbsp; Red ≥ 70 (high) &nbsp;|&nbsp; Amber ≥ 35 (medium).
+    Sub-scores: <strong>Rarity</strong>/25 &nbsp;|&nbsp; <strong>Chain</strong>/30 &nbsp;|&nbsp;
+    <strong>Timing</strong>/20 &nbsp;|&nbsp; <strong>Deviation</strong>/15 &nbsp;|&nbsp; <strong>Sensitive</strong>/10
+  </p>
+  <div style="overflow-x:auto">
+  <table style="border-collapse:collapse;width:100%;font-size:13px;border:1px solid #dee2e6">
+    <thead>
+      <tr>
+        <th {_TH}>Identity</th>
+        <th {_TH}>Session Window</th>
+        <th {_TH}>Events</th>
+        <th {_TH}>Duration</th>
+        <th {_TH}>Session Risk</th>
+        <th {_TH}>Rarity /25</th>
+        <th {_TH}>Chain /30</th>
+        <th {_TH}>Timing /20</th>
+        <th {_TH}>Deviation /15</th>
+        <th {_TH}>Sensitive /10</th>
+        <th {_TH}>Explanation</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  </div>
+</section>"""
+
+
 def _tabbed_report(baselines: dict, generated_at: str,
                    period_label: str, period_value: str, title_date: str) -> str:
     all_scores:   dict = {}
@@ -1288,11 +1424,13 @@ def _tabbed_report(baselines: dict, generated_at: str,
                    _peak_day_signals_html(RANGE_DATES, all_scores) +
                    _notable_anomalies_html(RANGE_DATES, all_profiles, all_scores, baselines))
 
-    exfil_html = _exfil_tab_html()
+    exfil_html   = _exfil_tab_html()
+    session_html = _session_tab_html()
 
     tab_buttons = [
         '<button class="tab-btn active" data-tab="findings">Findings</button>',
         '<button class="tab-btn" data-tab="exfil">Exfil Detection</button>',
+        '<button class="tab-btn" data-tab="session">Session Detection</button>',
         '<span class="tab-label">UEBA</span>',
         '<button class="tab-btn" data-tab="period">Period Overview</button>',
     ]
@@ -1328,6 +1466,7 @@ def _tabbed_report(baselines: dict, generated_at: str,
 <div class="tabs">{tabs_html}</div>
 <div class="tab-pane active" id="tab-findings">{findings_html}</div>
 <div class="tab-pane" id="tab-exfil">{exfil_html}</div>
+<div class="tab-pane" id="tab-session">{session_html}</div>
 <div class="tab-pane" id="tab-period">{period_html}</div>
 {panes_html}
 <script>
