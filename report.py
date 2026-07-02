@@ -46,7 +46,7 @@ def _score_badge(score: float | None) -> str:
     if score is None:
         return '<span class="badge badge-na">—</span>'
     color = _score_color(score)
-    return f'<span class="badge" style="background:{color}">{score:.4f}</span>'
+    return f'<span class="badge" style="background:{color}">{score * 100:.0f}</span>'
 
 
 def _dim_bar(val: float) -> str:
@@ -541,11 +541,11 @@ def _html_css() -> str:
 
 def _legend_html() -> str:
     return """<div class="threshold-legend">
-  <span class="legend-label">Score thresholds:</span>
-  <span class="legend-item" style="background:#27ae60">&#9632; Green &lt; 0.20 — Normal</span>
-  <span class="legend-item" style="background:#f1c40f;color:#333">&#9632; Yellow 0.20–0.39 — Low concern, monitor</span>
-  <span class="legend-item" style="background:#e67e22">&#9632; Orange 0.40–0.69 — Suspicious, investigate</span>
-  <span class="legend-item" style="background:#c0392b">&#9632; Red &#x2265; 0.70 — High risk, escalate</span>
+  <span class="legend-label">Score thresholds (0–100):</span>
+  <span class="legend-item" style="background:#27ae60">&#9632; Green &lt; 20 — Normal</span>
+  <span class="legend-item" style="background:#f1c40f;color:#333">&#9632; Yellow 20–39 — Low concern, monitor</span>
+  <span class="legend-item" style="background:#e67e22">&#9632; Orange 40–69 — Suspicious, investigate</span>
+  <span class="legend-item" style="background:#c0392b">&#9632; Red &#x2265; 70 — High risk, escalate</span>
 </div>"""
 
 
@@ -1123,7 +1123,7 @@ def _findings_tab_html(all_scores: dict) -> str:
 <section>
   <h2>Findings — {DATE_RANGE_START} → {DATE_RANGE_END}</h2>
   <p style="font-size:12px;color:#7f8c8d;margin:4px 0 2px">
-    UEBA: behavioural deviation (0–1) &nbsp;|&nbsp; Red ≥ 0.7 &nbsp;|&nbsp; Amber ≥ 0.4
+    UEBA: behavioural deviation (0–100) &nbsp;|&nbsp; Red ≥ 70 &nbsp;|&nbsp; Amber ≥ 40
   </p>
   {exfil_note}
   {session_note}
