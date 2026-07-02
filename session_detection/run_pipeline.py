@@ -81,7 +81,7 @@ def main():
         "session_id", "identity_id", "session_start", "session_end", "num_events",
         "duration_minutes", "session_risk_score", "sequence_rarity_score",
         "suspicious_chain_score", "timing_burst_score", "feature_deviation_score",
-        "sensitive_action_score", "risk_explanation",
+        "sensitive_action_score", "risk_explanation", "flagged_api_sequences",
     ]]
     top_csv = os.path.join(OUT_DIR, "top_risky_sessions.csv")
     top.to_csv(top_csv, index=False)
